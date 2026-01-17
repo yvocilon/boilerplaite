@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execSync, spawn } from "child_process";
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
@@ -16,36 +16,64 @@ function question(prompt) {
 }
 
 function run(cmd, options = {}) {
-  console.log(`\n> ${cmd}`);
+  console.log(`> ${cmd}`);
   execSync(cmd, { stdio: "inherit", ...options });
 }
 
-async function main() {
-  console.log("\n🚀 Webapp Shell Setup\n");
+function tryRun(cmd) {
+  try {
+    execSync(cmd, { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  // Get project name
+async function main() {
+  console.log("\n🚀 BoilerpAIte Setup\n");
+
   const cwd = process.cwd();
+
+  // 1. Install dependencies first
+  console.log("📦 Installing dependencies...\n");
+  run("pnpm install");
+
+  // 2. Get project name
   const defaultName = path.basename(cwd).toLowerCase().replace(/[^a-z0-9-]/g, "-");
-  const projectName = (await question(`Project name (${defaultName}): `)) || defaultName;
+  const projectName = (await question(`\nProject name (${defaultName}): `)) || defaultName;
 
   const dbName = projectName.replace(/-/g, "_");
   const containerName = `${projectName}-db`;
 
-  console.log(`\n📦 Setting up "${projectName}"...\n`);
+  console.log(`\n⚙️  Setting up "${projectName}"...\n`);
 
-  // Update package.json
+  // 3. Update package.json
   const pkgPath = path.join(cwd, "package.json");
   const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
   pkg.name = projectName;
   fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
   console.log("✅ Updated package.json");
 
-  // Generate .env
+  // 4. Handle .env - reuse existing password if available
   const envExamplePath = path.join(cwd, ".env.example");
   const envPath = path.join(cwd, ".env");
 
-  const dbPassword = crypto.randomBytes(16).toString("hex");
-  const authSecret = crypto.randomBytes(32).toString("hex");
+  let dbPassword;
+  let authSecret;
+
+  // Check if .env already exists with a password
+  if (fs.existsSync(envPath)) {
+    const existingEnv = fs.readFileSync(envPath, "utf-8");
+    const pwMatch = existingEnv.match(/DATABASE_URL=postgresql:\/\/[^:]+:([^@]+)@/);
+    const secretMatch = existingEnv.match(/BETTER_AUTH_SECRET=(.+)/);
+    if (pwMatch) dbPassword = pwMatch[1];
+    if (secretMatch) authSecret = secretMatch[1];
+    console.log("✅ Reusing existing .env credentials");
+  }
+
+  // Generate new ones if needed
+  if (!dbPassword) dbPassword = crypto.randomBytes(16).toString("hex");
+  if (!authSecret) authSecret = crypto.randomBytes(32).toString("hex");
 
   let envContent = fs.readFileSync(envExamplePath, "utf-8");
   envContent = envContent.replace(
@@ -62,9 +90,9 @@ async function main() {
   );
 
   fs.writeFileSync(envPath, envContent);
-  console.log("✅ Created .env with generated secrets");
+  console.log("✅ Created .env");
 
-  // Update CLAUDE.md
+  // 5. Update CLAUDE.md
   const claudePath = path.join(cwd, "CLAUDE.md");
   if (fs.existsSync(claudePath)) {
     let content = fs.readFileSync(claudePath, "utf-8");
@@ -73,57 +101,52 @@ async function main() {
     console.log("✅ Updated CLAUDE.md");
   }
 
-  // Remove .git and reinitialize
+  // 6. Remove .git and reinitialize
   const gitDir = path.join(cwd, ".git");
   if (fs.existsSync(gitDir)) {
     fs.rmSync(gitDir, { recursive: true });
-    console.log("✅ Removed old .git");
   }
   run("git init");
   console.log("✅ Initialized fresh git repo");
 
-  // Check if Docker is running
-  try {
-    execSync("docker info", { stdio: "ignore" });
-  } catch {
+  // 7. Check if Docker is running
+  if (!tryRun("docker info")) {
     console.error("\n❌ Docker is not running. Please start Docker and run: pnpm spinup:db\n");
     rl.close();
     return;
   }
 
-  // Spin up PostgreSQL
+  // 8. Handle PostgreSQL container
   console.log("\n🐘 Starting PostgreSQL...\n");
 
-  // Check if container already exists
-  try {
-    execSync(`docker inspect ${containerName}`, { stdio: "ignore" });
-    console.log(`Container "${containerName}" already exists, starting it...`);
+  const containerExists = tryRun(`docker inspect ${containerName}`);
+
+  if (containerExists) {
+    // Container exists - just start it
+    console.log(`Container "${containerName}" exists, starting...`);
     run(`docker start ${containerName}`);
-  } catch {
-    // Container doesn't exist, create it
-    run(`docker run -d \\
-      --name ${containerName} \\
-      -e POSTGRES_USER=postgres \\
-      -e POSTGRES_PASSWORD=${dbPassword} \\
-      -e POSTGRES_DB=${dbName} \\
-      -p 5432:5432 \\
-      postgres:16`);
+  } else {
+    // Check if port 5432 is in use
+    const portInUse = tryRun("lsof -i :5432");
+    if (portInUse) {
+      console.error("❌ Port 5432 is already in use. Stop the other database first.");
+      rl.close();
+      process.exit(1);
+    }
+
+    // Create new container
+    run(`docker run -d --name ${containerName} -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=${dbPassword} -e POSTGRES_DB=${dbName} -p 5432:5432 postgres:16`);
   }
 
-  // Wait for PostgreSQL to be ready
-  console.log("\n⏳ Waiting for PostgreSQL to be ready...");
+  // 9. Wait for PostgreSQL to be ready
+  console.log("\n⏳ Waiting for PostgreSQL...");
   let attempts = 0;
   while (attempts < 30) {
-    try {
-      execSync(
-        `docker exec ${containerName} pg_isready -U postgres`,
-        { stdio: "ignore" }
-      );
+    if (tryRun(`docker exec ${containerName} pg_isready -U postgres`)) {
       break;
-    } catch {
-      attempts++;
-      await new Promise((r) => setTimeout(r, 1000));
     }
+    attempts++;
+    await new Promise((r) => setTimeout(r, 1000));
   }
 
   if (attempts >= 30) {
@@ -134,7 +157,7 @@ async function main() {
 
   console.log("✅ PostgreSQL is ready");
 
-  // Generate and run migrations
+  // 10. Generate and run migrations
   console.log("\n📊 Setting up database...\n");
   run("pnpm db:generate");
   run("pnpm db:migrate");
@@ -143,9 +166,7 @@ async function main() {
   console.log("Next steps:\n");
   console.log("  pnpm dev              # Start dev server");
   console.log("  npx shadcn@latest add button card  # Add UI components\n");
-  console.log(`Database container: ${containerName}`);
-  console.log(`  Start: docker start ${containerName}`);
-  console.log(`  Stop:  docker stop ${containerName}\n`);
+  console.log(`Database: docker start/stop ${containerName}\n`);
 
   rl.close();
 }
