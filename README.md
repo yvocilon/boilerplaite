@@ -15,21 +15,18 @@ A production-ready boilerplate for building web apps fast. React Router v7 + bet
 ## Quick Start
 
 ```bash
-# Clone
 git clone git@github.com:yvocilon/boilerplaite.git my-project
 cd my-project
-
-# Install & setup (interactive)
-pnpm install
 pnpm setup
 ```
 
-The setup script will:
-1. Ask for your project name
-2. Create `.env` with generated secrets
-3. Spin up PostgreSQL in Docker
-4. Run database migrations
-5. Initialize a fresh git repo
+That's it. The setup script handles everything:
+- Installs dependencies
+- Asks for your project name
+- Creates `.env` with generated secrets
+- Spins up PostgreSQL in Docker
+- Runs database migrations
+- Initializes a fresh git repo
 
 Then start building:
 
