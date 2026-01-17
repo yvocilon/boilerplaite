@@ -1,0 +1,19 @@
+.DS_Store
+.env
+.env.local
+/node_modules/
+
+# React Router
+/.react-router/
+/build/
+
+# Testing
+/coverage/
+
+# Editor
+.vscode/
+.idea/
+
+# Playwright MCP
+.playwright-mcp/
+pnpm-lock.yaml
