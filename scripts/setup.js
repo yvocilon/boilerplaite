@@ -68,7 +68,7 @@ async function main() {
   const claudePath = path.join(cwd, "CLAUDE.md");
   if (fs.existsSync(claudePath)) {
     let content = fs.readFileSync(claudePath, "utf-8");
-    content = content.replace(/\*\*Webapp Shell\*\*/, `**${projectName}**`);
+    content = content.replace(/\*\*BoilerpAIte\*\*/, `**${projectName}**`);
     fs.writeFileSync(claudePath, content);
     console.log("✅ Updated CLAUDE.md");
   }

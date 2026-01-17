@@ -2,7 +2,7 @@
 
 ## What This Is
 
-**Webapp Shell** — A production-ready boilerplate for React Router v7 applications with authentication, database, and file storage.
+**BoilerpAIte** — A production-ready boilerplate for React Router v7 applications with authentication, database, and file storage.
 
 ## Key Documents
 
