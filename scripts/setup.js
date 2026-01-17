@@ -29,6 +29,27 @@ function tryRun(cmd) {
   }
 }
 
+function getOutput(cmd) {
+  try {
+    return execSync(cmd, { encoding: "utf-8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function findContainerOnPort(port) {
+  // Get all running containers with their port mappings
+  const output = getOutput(`docker ps --format "{{.Names}}:{{.Ports}}"`);
+  if (!output) return null;
+
+  for (const line of output.split("\n")) {
+    if (line.includes(`:${port}->`)) {
+      return line.split(":")[0];
+    }
+  }
+  return null;
+}
+
 async function main() {
   console.log("\n🚀 BoilerpAIte Setup\n");
 
@@ -126,16 +147,39 @@ async function main() {
     console.log(`Container "${containerName}" exists, starting...`);
     run(`docker start ${containerName}`);
   } else {
-    // Check if port 5432 is in use
-    const portInUse = tryRun("lsof -i :5432");
-    if (portInUse) {
-      console.error("❌ Port 5432 is already in use. Stop the other database first.");
-      rl.close();
-      process.exit(1);
+    // Check if default port 5432 is in use
+    let dbPort = 5432;
+    const blockingContainer = findContainerOnPort(5432);
+
+    if (blockingContainer || tryRun("lsof -i :5432")) {
+      const usedBy = blockingContainer ? `container "${blockingContainer}"` : "another process";
+      console.log(`\n⚠️  Port 5432 is in use by ${usedBy}`);
+      const altPort = await question("Enter alternative port (e.g., 5433): ");
+
+      if (!altPort || !/^\d+$/.test(altPort)) {
+        console.error("❌ Invalid port number.");
+        rl.close();
+        process.exit(1);
+      }
+
+      dbPort = parseInt(altPort, 10);
+
+      // Check if alternative port is also in use
+      if (findContainerOnPort(dbPort) || tryRun(`lsof -i :${dbPort}`)) {
+        console.error(`❌ Port ${dbPort} is also in use.`);
+        rl.close();
+        process.exit(1);
+      }
+
+      // Update .env with the new port
+      let envContent = fs.readFileSync(envPath, "utf-8");
+      envContent = envContent.replace(/:5432\//, `:${dbPort}/`);
+      fs.writeFileSync(envPath, envContent);
+      console.log(`✅ Updated .env to use port ${dbPort}`);
     }
 
     // Create new container
-    run(`docker run -d --name ${containerName} -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=${dbPassword} -e POSTGRES_DB=${dbName} -p 5432:5432 postgres:16`);
+    run(`docker run -d --name ${containerName} -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=${dbPassword} -e POSTGRES_DB=${dbName} -p ${dbPort}:5432 postgres:16`);
   }
 
   // 9. Wait for PostgreSQL to be ready
